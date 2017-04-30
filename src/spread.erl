@@ -1,196 +1,231 @@
 -module(spread).
 %% reference on ex_canvas.erl in wx:demo()
 
--behavior(wx_object).
 
-%% client API
--export([start/1, start/0]).
-
-%% wx_object callbacks
--export([init/1, handle_event/2, handle_sync_event/3, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include_lib("wx/include/wx.hrl").
 
+-behaviour(wx_object).
+-export([start/0, start/1, start_link/0, start_link/1, format/3,
+  init/1, terminate/2, code_change/3,
+  handle_info/2, handle_call/3, handle_cast/2, handle_event/2]).
+
+
 -record(state,
 {
-  parent
-  , config
-  , canvas
-  , bitmap
-  , overlay
-  , pos
+  win,
+  parent,
+  config,
+  canvas,
+  bitmap,
+  overlay,
+  pos
 }).
 
-start() -> start([]).
-start(Config) -> wx_object:start_link(?MODULE, Config, []).
+%% For wx-2.9 usage
+-ifndef(wxSTC_ERLANG_COMMENT_FUNCTION).
+-define(wxSTC_ERLANG_COMMENT_FUNCTION, 14).
+-define(wxSTC_ERLANG_COMMENT_MODULE, 15).
+-define(wxSTC_ERLANG_COMMENT_DOC, 16).
+-define(wxSTC_ERLANG_COMMENT_DOC_MACRO, 17).
+-define(wxSTC_ERLANG_ATOM_QUOTED, 18).
+-define(wxSTC_ERLANG_MACRO_QUOTED, 19).
+-define(wxSTC_ERLANG_RECORD_QUOTED, 20).
+-define(wxSTC_ERLANG_NODE_NAME_QUOTED, 21).
+-define(wxSTC_ERLANG_BIFS, 22).
+-define(wxSTC_ERLANG_MODULES, 23).
+-define(wxSTC_ERLANG_MODULES_ATT, 24).
+-endif.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% implement behaviour of wx_object
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-init(Config) ->
-  wx:new(Config),
-  wx:batch(fun() -> do_init(Config) end).
+start() ->
+  start([]).
 
-do_init(Config) ->
-%%  Parent = proplists:get_value(parent, Config),
+start(Debug) ->
+  wx_object:start(?MODULE, Debug, []).
 
-  Frame = wxFrame:new(wx:null(), ?wxID_ANY, "Spread", [{size, {1000, 500}}]),
+start_link() ->
+  start_link([]).
+
+start_link(Debug) ->
+  wx_object:start_link(?MODULE, Debug, []).
+
+format(_Config, Str, Args) ->
+  io:format(Str, Args),
+  ok.
+
+-define(DEBUG_NONE, 101).
+-define(DEBUG_VERBOSE, 102).
+-define(DEBUG_TRACE, 103).
+-define(DEBUG_DRIVER, 104).
+
+init(Options) ->
+  wx:new(Options),
+  process_flag(trap_exit, true),
+
+  Frame = wxFrame:new(wx:null(), ?wxID_ANY, "wxErlang widgets", [{size, {1000, 500}}]),
   MB = wxMenuBar:new(),
   File = wxMenu:new([]),
+  wxMenu:append(File, ?wxID_PRINT, "&Print code"),
+  wxMenu:appendSeparator(File),
   wxMenu:append(File, ?wxID_EXIT, "&Quit"),
+  Debug = wxMenu:new([]),
+  wxMenu:appendRadioItem(Debug, ?DEBUG_NONE, "None"),
+  wxMenu:appendRadioItem(Debug, ?DEBUG_VERBOSE, "Verbose"),
+  wxMenu:appendRadioItem(Debug, ?DEBUG_TRACE, "Trace"),
+  wxMenu:appendRadioItem(Debug, ?DEBUG_DRIVER, "Driver"),
+  Help = wxMenu:new([]),
+  wxMenu:append(Help, ?wxID_HELP, "Help"),
+  wxMenu:append(Help, ?wxID_ABOUT, "About"),
   wxMenuBar:append(MB, File, "&File"),
+  wxMenuBar:append(MB, Debug, "&Debug"),
+  wxMenuBar:append(MB, Help, "&Help"),
   wxFrame:setMenuBar(Frame, MB),
 
   wxFrame:connect(Frame, command_menu_selected),
   wxFrame:connect(Frame, close_window),
 
-  Parent = wxSplitterWindow:new(Frame, [{style, ?wxSP_NOBORDER}]),
-  wxSplitterWindow:setSashGravity(Parent, 0.5),
-  Panel = wxPanel:new(Parent, []),
+  _SB = wxFrame:createStatusBar(Frame, []),
 
-  MainSizer = wxBoxSizer:new(?wxVERTICAL),
-  Sizer = wxStaticBoxSizer:new(?wxVERTICAL, Panel, [{label, "Spread"}]),
-  Button = wxButton:new(Panel, ?wxID_ANY, [{label, "Restart"}]),
-  Canvas = wxPanel:new(Panel, [{style, ?wxFULL_REPAINT_ON_RESIZE}]),
+  %% Setup on toplevel because stc seems to steal this on linux
+  wxFrame:dragAcceptFiles(Frame, true),
+  wxFrame:connect(Frame, drop_files),
 
-  wxPanel:connect(Canvas, paint, [callback]),
-  wxPanel:connect(Canvas, size),
-  wxPanel:connect(Canvas, left_down),
-  wxPanel:connect(Canvas, left_up),
-  wxPanel:connect(Canvas, motion),
+  %%   T        Uppersplitter
+  %%   O        Left   |    Right
+  %%   P  Widgets|Code |    Demo
+  %%   S  -------------------------------
+  %%   P          Log Window
+  TopSplitter = wxSplitterWindow:new(Frame, [{style, ?wxSP_NOBORDER}]),
+  %% Setup so that sizers and initial sizes, resizes the windows correct
+  wxSplitterWindow:setSashGravity(TopSplitter, 0.5),
 
-  wxPanel:connect(Button, command_button_clicked),
+  %% LeftSplitter:
 
-  %% link up the GUI components
-  wxSizer:add(Sizer, Button, [{border, 5}, {flag, ?wxALL}]),
-  wxSizer:addSpacer(Sizer, 5),
-  wxSizer:add(Sizer, Canvas, [{flag, ?wxEXPAND}, {proportion, 1}]),
 
-  wxSizer:add(MainSizer, Sizer, [{flag, ?wxEXPAND}, {proportion, 1}]),
 
-  wxPanel:setSizer(Panel, MainSizer),
-  wxSizer:layout(MainSizer),
+  %% Demo:
 
-  {W, H} = wxPanel:getSize(Canvas),
-  Bitmap = wxBitmap:new(max(W, 30), max(30, H)),
+  %% UpperSplitter:
 
+  %% TopSplitter:
+
+
+
+
+  wxFrame:layout(Frame),
   wxFrame:show(Frame),
 
-  {Panel, #state{
-    parent = Parent
-    , config = Config
-    , canvas = Canvas
-    , bitmap = Bitmap
-    , overlay = wxOverlay:new()
+  %% Load the first example:
+
+  %% The windows should be set up now, Reset Gravity so we get what we want
+  wxSplitterWindow:setSashGravity(TopSplitter, 1.0),
+  wxSplitterWindow:setMinimumPaneSize(TopSplitter, 1),
+
+  wxToolTip:enable(true),
+  wxToolTip:setDelay(500),
+
+  {Frame, #state{
+    win = Frame
   }}.
 
-handle_sync_event(#wx{event = #wxPaint{}}, _wxObj,
-    #state{canvas = Canvas, bitmap = Bitmap}) ->
-  DC = wxPaintDC:new(Canvas),
-  redraw(DC, Bitmap),
-  wxPaintDC:destroy(DC),
-  ok.
 
-handle_event(#wx{event = #wxCommand{type = command_button_clicked}}, State = #state{}) ->
-  {W, H} = wxPanel:getSize(State#state.canvas),
-  Positions = lists:map(fun(_) -> get_pos(W, H) end, lists:seq(1, (W + H) div 20)),
-  Fun = fun(DC) ->
-    wxDC:clear(DC),
-    lists:foreach(fun({X, Y} = Pos) ->
-      wxDC:setBrush(DC, ?wxTRANSPARENT_BRUSH),
-      wxDC:setPen(DC, wxPen:new(?wxBLACK, [{width, 2}])),
-      %% TODO
-      wxDC:drawLabel(DC, "Text", {X, Y, 60, 20})
-                  end, Positions)
-        end,
-  draw(State#state.canvas, State#state.bitmap, Fun),
+
+%%%%%%%%%%%%
+%% Callbacks
+
+%% Handled as in normal gen_server callbacks
+handle_info({'EXIT', _, wx_deleted}, State) ->
   {noreply, State};
-handle_event(#wx{event = #wxSize{size = {W, H}}}, State = #state{bitmap = Prev, canvas = Canvas}) ->
-  if
-    W > 0 andalso H > 0 ->
-      Bitmap = wxBitmap:new(W, H),
-      draw(Canvas, Bitmap, fun(DC) -> wxDC:clear(DC) end),
-      wxBitmap:destroy(Prev),
-      {noreply, State#state{bitmap = Bitmap}};
-    true ->
+handle_info({'EXIT', _, shutdown}, State) ->
+  {noreply, State};
+handle_info({'EXIT', _, normal}, State) ->
+  {noreply, State};
+handle_info(Msg, State) ->
+  format(State, "Got Info ~p~n", [Msg]),
+  {noreply, State}.
+
+handle_call(Msg, _From, State) ->
+  format(State, "Got Call ~p~n", [Msg]),
+  {reply, ok, State}.
+
+handle_cast(Msg, State) ->
+  format(State, "Got cast ~p~n", [Msg]),
+  {noreply, State}.
+
+%% Async Events are handled in handle_event as in handle_info
+handle_event(#wx{id = Id,
+  event = #wxCommand{type = command_menu_selected}},
+    State = #state{}) ->
+  case Id of
+    ?wxID_PRINT ->
+      %% If you are going to printout mainly text it is easier if
+      %% you generate HTML code and use a wxHtmlEasyPrint
+      %% instead of using DCs
+      HEP = wxHtmlEasyPrinting:new([{name, "Print"},
+        {parentWindow, State#state.win}]),
+      Html = demo_html_tagger:erl2htmltext(?MODULE),
+      wxHtmlEasyPrinting:previewText(HEP, Html),
+      {noreply, State};
+    ?DEBUG_TRACE ->
+      wx:debug(trace),
+      {noreply, State};
+    ?DEBUG_DRIVER ->
+      wx:debug(driver),
+      {noreply, State};
+    ?DEBUG_VERBOSE ->
+      wx:debug(verbose),
+      {noreply, State};
+    ?DEBUG_NONE ->
+      wx:debug(none),
+      {noreply, State};
+    ?wxID_HELP ->
+      wx_misc:launchDefaultBrowser("http://www.erlang.org/doc/apps/wx/part_frame.html"),
+      {noreply, State};
+    ?wxID_ABOUT ->
+      WxWVer = io_lib:format("~p.~p.~p.~p",
+        [?wxMAJOR_VERSION, ?wxMINOR_VERSION,
+          ?wxRELEASE_NUMBER, ?wxSUBRELEASE_NUMBER]),
+      application:load(wx),
+      {ok, WxVsn} = application:get_key(wx, vsn),
+      AboutString =
+        "Demo of various widgets\n"
+        "Authors: Olle & Dan\n\n" ++
+        "Frontend: wx-" ++ WxVsn ++
+        "\nBackend: wxWidgets-" ++ lists:flatten(WxWVer),
+
+      wxMessageDialog:showModal(wxMessageDialog:new(State#state.win, AboutString,
+        [{style,
+          ?wxOK bor
+            ?wxICON_INFORMATION bor
+            ?wxSTAY_ON_TOP},
+          {caption, "About"}])),
+      {noreply, State};
+    ?wxID_EXIT ->
+      {stop, normal, State};
+    _ ->
       {noreply, State}
   end;
-handle_event(#wx{event = #wxMouse{type = left_down, x = X, y = Y}}, State) ->
-  {noreply, State#state{pos = {X, Y}}};
-handle_event(#wx{event = #wxMouse{type = motion, x = X1, y = Y1}},
-    #state{pos = Start, overlay = Overlay, canvas = Canvas} = State) ->
-  case Start of
-    undefined -> ignore;
-    {X0, Y0} ->
-      DC = wxClientDC:new(Canvas),
-      DC0 = wxDCOverlay:new(Overlay, DC),
-      wxDCOverlay:clear(DC0),
-      wxDC:setPen(DC, ?wxLIGHT_GREY_PEN),
-      wxDC:setBrush(DC, ?wxTRANSPARENT_BRUSH),
-      wxDC:drawRectangle(DC, {X0, Y0, X1 - X0, Y1 - Y0}),
-      wxDCOverlay:destroy(DC0),
-      wxClientDC:destroy(DC)
-  end,
-  {noreply, State};
-handle_event(#wx{event = #wxMouse{type = left_up}},
-    #state{overlay = Overlay, canvas = Canvas} = State) ->
-  DC = wxClientDC:new(Canvas),
-  DC0 = wxDCOverlay:new(Overlay, DC),
-  wxDCOverlay:clear(DC0),
-  wxDCOverlay:destroy(DC0),
-  wxClientDC:destroy(DC),
-  wxOverlay:reset(Overlay),
-  {norepl, State#state{pos = undefined}};
-handle_event(Ev = #wx{}, State = #state{}) ->
-  io:format("Got event ~p~n", [Ev]),
+handle_event(#wx{event = #wxClose{}}, State = #state{win = Frame}) ->
+  io:format("~p Closing window ~n", [self()]),
+  ok = wxFrame:setStatusText(Frame, "Closing...", []),
+  {stop, normal, State};
+handle_event(Ev, State) ->
+  format(State, "~p Got event ~p ~n", [?MODULE, Ev]),
   {noreply, State}.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% callbacks for gen_server
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-handle_call(shutdown, _From, State = #state{parent = Panel}) ->
-  wxPanel:destroy(Panel),
-  {stop, normal, ok, State};
-handle_call(Request, _From, State) ->
-  io:format("Got call ~p~n", [Request]),
-  {reply, {error, nyi}, State}.
+code_change(_, _, State) ->
+  {stop, not_yet_implemented, State}.
 
-handle_cast(Request, State) ->
-  io:format("Got cast ~p~n", [Request]),
-  {noreply, State}.
+terminate(_Reason, _State = #state{win = Frame}) ->
+  wxFrame:destroy(Frame),
+  wx:destroy().
 
-handle_info(Info, State) ->
-  io:format("Got Info ~p~n", [Info]),
-  {noreply, State}.
+%%%%%%%%%%%%%%%%% Internals %%%%%%%%%%
 
-terminate(_Reason, State) ->
-  wxOverlay:destroy(State#state.overlay),
-  ok.
 
-code_change(_OldVsn, _State, Extra) ->
-  {stop, ignore, Extra}.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Local functions
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+-define(stc, wxStyledTextCtrl).
 
-draw(Canvas, Bitmap, Fun) ->
-  MemoryDC = wxMemoryDC:new(Bitmap),
-  Fun(MemoryDC),
 
-  CDC = wxWindowDC:new(Canvas),
-  wxDC:blit(CDC, {0, 0},
-    {wxBitmap:getWidth(Bitmap), wxBitmap:getHeight(Bitmap)},
-    MemoryDC, {0, 0}),
-  wxWindowDC:destroy(CDC),
-  wxMemoryDC:destroy(MemoryDC).
 
-redraw(DC, Bitmap) ->
-  MemoryDC = wxMemoryDC:new(Bitmap),
-  wxDC:blit(DC, {0, 0},
-    {wxBitmap:getWidth(Bitmap), wxBitmap:getHeight(Bitmap)},
-    MemoryDC, {0, 0}),
-  wxMemoryDC:destroy(MemoryDC).
 
-get_pos(W, H) ->
-  {rand:uniform(W), rand:uniform(H)}.
